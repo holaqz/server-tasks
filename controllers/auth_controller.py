@@ -1,7 +1,7 @@
 from fastapi import HTTPException, status
 from typing import List, Dict
 import time
-from datetime import datetime
+from datetime import datetime, date
 from core.security import (
     create_jwt_token, verify_password, get_password_hash, 
     decode_jwt_token, revoke_token, revoke_all_user_tokens, is_token_revoked, clear_user_revoked_tokens
@@ -12,18 +12,16 @@ from schemas.user_schemas import UserCreateRequest, UserLoginRequest, UserDTO, T
 settings = get_settings()
 
 class TokenInfo:
-    def __init__(self, token_id: str, created_at: datetime, expires_at: datetime, device_info: str = "Unknown"):
+    def __init__(self, token_id: str, created_at: datetime, expires_at: datetime):
         self.token_id = token_id
         self.created_at = created_at
         self.expires_at = expires_at
-        self.device_info = device_info
 
     def to_dict(self):
         return {
             "token_id": self.token_id,
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat(),
-            "device_info": self.device_info,
             "is_expired": datetime.utcnow() > self.expires_at
         }
 
@@ -41,21 +39,38 @@ class AuthController:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Пользователь с таким именем уже зарегистрирован"
             )
-        
-        user_id = self._user_id_counter
-        self._user_id_counter += 1
+
+        if user_data.password != user_data.password_confirm:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Пароли не совпадают"
+            )
+
+        if user_data.birth_date > date.today():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Дата рождения не может быть в будущем"
+            )
         
         user = {
-            "id": user_id,
+            "id": self._user_id_counter,
             "username": user_data.username,
             "email": user_data.email,
+            "birth_date": user_data.birth_date,
             "hashed_password": get_password_hash(user_data.password)
         }
         
         self._users[user_data.username] = user
-        self._active_tokens[user_id] = []
+        self._active_tokens[self._user_id_counter] = []
         
-        return UserDTO(**user)
+        self._user_id_counter += 1
+        
+        return UserDTO(
+            id=user["id"],
+            username=user["username"],
+            email=user["email"],
+            birth_date=user["birth_date"]
+        )
 
     def login(self, login_data: UserLoginRequest) -> TokenDTO:
         user = self._users.get(login_data.username)

@@ -1,38 +1,48 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator, Field
+from datetime import date
 from typing import Optional
 
-class UserCreateRequest(BaseModel):
+class UserBase(BaseModel):
     username: str
     email: EmailStr
-    password: str
+    birth_date: date
 
-    def to_dto(self):
-        return UserCreateDTO(username=self.username, email=self.email)
+class UserCreateRequest(UserBase):
+    password: str
+    password_confirm: str
+
+    @validator('password_confirm')
+    def passwords_match(cls, v, values, **kwargs):
+        if 'password' in values and v != values['password']:
+            raise ValueError('Пароли не совпадают')
+        return v
+
+    @validator('birth_date')
+    def validate_birth_date(cls, v):
+        if v > date.today():
+            raise ValueError('Дата рождения не может быть в будущем')
+        return v
 
 class UserLoginRequest(BaseModel):
     username: str
     password: str
 
-    def to_dto(self):
-        return TokenDTO
-
-class UserDTO(BaseModel):
-    id: int
-    username: str
-    email: EmailStr
+class UserDTO(UserBase):
+    id: int = Field(...)
 
     class Config:
-        orm_mode = True
-
-class UserCreateDTO(BaseModel):
-    username: str
-    email: EmailStr
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "username": "user123",
+                "email": "user@example.com",
+                "birth_date": "1990-01-01"
+            }
+        }
 
 class TokenDTO(BaseModel):
     access_token: str
-    refresh_token: Optional[str] = None
-    token_type: str = "bearer"
+    refresh_token: str
 
-class TokenData(BaseModel):
-    username: Optional[str] = None
-    id: Optional[int] = None 
+class LoginResponseDTO(BaseModel):
+    access_token: str 

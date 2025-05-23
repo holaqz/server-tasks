@@ -73,33 +73,36 @@ def is_token_revoked(token: str, user_id: int) -> bool:
         token = token[7:]
     return token in revoked_tokens or f"user_{user_id}" in revoked_tokens
 
-async def get_current_user(request: Request) -> Dict:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Не удалось проверить учетные данные",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
-    access_token_cookie = request.cookies.get("access_token")
-    
-    if access_token_cookie and access_token_cookie.startswith("Bearer "):
-        token = access_token_cookie[7:]
-    else:
-        authorization = request.headers.get("Authorization")
-        if not authorization or not authorization.startswith("Bearer "):
-            raise credentials_exception
-        token = authorization[7:]
-    
-    payload = decode_jwt_token(token)
-    if payload is None or payload.get("type") != "access":
-        raise credentials_exception
+async def get_current_user(request: Request) -> dict:
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Не предоставлен токен аутентификации"
+        )
 
-    user_id = payload.get("id")
-    if user_id and is_token_revoked(token, user_id):
-        raise credentials_exception
+    try:
+        payload = decode_jwt_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Недействительный токен"
+            )
+            
+        if is_token_revoked(token, payload.get("id")):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Токен был отозван"
+            )
+            
+        payload["token"] = token
+        return payload
         
-    payload["token"] = token
-    return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Недействительный токен аутентификации"
+        )
 
 create_token = create_jwt_token
 decode_token = decode_jwt_token
@@ -107,4 +110,18 @@ decode_token = decode_jwt_token
 def clear_user_revoked_tokens(user_id: int):
     key = f"user_{user_id}"
     if key in revoked_tokens:
-        revoked_tokens.remove(key) 
+        revoked_tokens.remove(key)
+
+class TokenInfo:
+    def __init__(self, token_id: str, created_at: datetime, expires_at: datetime):
+        self.token_id = token_id
+        self.created_at = created_at
+        self.expires_at = expires_at
+
+    def to_dict(self):
+        return {
+            "token_id": self.token_id,
+            "created_at": self.created_at.isoformat(),
+            "expires_at": self.expires_at.isoformat(),
+            "is_expired": datetime.utcnow() > self.expires_at
+        } 

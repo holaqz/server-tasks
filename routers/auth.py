@@ -1,40 +1,48 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Response, Request
-from fastapi.security import OAuth2PasswordRequestForm
 from typing import List, Dict
 from controllers.auth_controller import AuthController
-from schemas.user_schemas import UserCreateRequest, UserLoginRequest, UserDTO, TokenDTO
+from schemas.user_schemas import UserCreateRequest, UserLoginRequest, UserDTO, TokenDTO, LoginResponseDTO
 from core.security import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 auth_controller = AuthController()
 
-@router.post("/register", response_model=UserDTO, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=UserDTO)
 async def register(user_data: UserCreateRequest):
-    user = auth_controller.register(user_data)
-    return user
+    try:
+        return auth_controller.register(user_data)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Произошла ошибка при регистрации: {str(e)}"
+        )
 
-@router.post("/login", response_model=TokenDTO)
-async def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
-    login_data = UserLoginRequest(username=form_data.username, password=form_data.password)
+@router.post("/login", response_model=LoginResponseDTO)
+async def login(
+    response: Response,
+    username: str = Form(...),
+    password: str = Form(...)
+):
+    login_data = UserLoginRequest(username=username, password=password)
     tokens = auth_controller.login(login_data)
     
     response.set_cookie(
         key="access_token",
-        value=f"Bearer {tokens.access_token}",
+        value=tokens.access_token,
         httponly=True,
-        samesite="strict",
-        max_age=1800
+        samesite="strict"
     )
     
     response.set_cookie(
         key="refresh_token",
-        value=f"Bearer {tokens.refresh_token}",
+        value=tokens.refresh_token,
         httponly=True,
-        samesite="strict",
-        max_age=7 * 24 * 3600
+        samesite="strict"
     )
     
-    return tokens
+    return LoginResponseDTO(access_token=tokens.access_token)
 
 @router.get("/me", response_model=UserDTO)
 async def get_current_user_info(request: Request):
@@ -70,38 +78,35 @@ async def revoke_all_tokens(request: Request, response: Response):
 @router.post("/refresh")
 async def refresh_token(request: Request, response: Response):
     refresh_token = request.cookies.get("refresh_token")
-    if not refresh_token or not refresh_token.startswith("Bearer "):
+    if not refresh_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Refresh token не предоставлен"
         )
     
-    refresh_token = refresh_token[7:]
     tokens = auth_controller.refresh_token(refresh_token)
     
     response.set_cookie(
         key="access_token",
-        value=f"Bearer {tokens.access_token}",
+        value=tokens.access_token,
         httponly=True,
-        samesite="strict",
-        max_age=1800
+        samesite="strict"
     )
     response.set_cookie(
         key="refresh_token",
-        value=f"Bearer {tokens.refresh_token}",
+        value=tokens.refresh_token,
         httponly=True,
-        samesite="strict",
-        max_age=7 * 24 * 3600
+        samesite="strict"
     )
     
-    return tokens
+    return LoginResponseDTO(access_token=tokens.access_token)
 
 @router.post("/change-password")
 async def change_password(
     request: Request,
     response: Response,
-    current_password: str,
-    new_password: str
+    current_password: str = Form(...),
+    new_password: str = Form(...)
 ):
     current_user = await get_current_user(request)
     auth_controller.change_password(current_user["id"], current_password, new_password)
