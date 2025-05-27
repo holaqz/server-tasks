@@ -6,6 +6,9 @@ from .config import get_settings
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException, status, Cookie, Request
 import secrets
+from sqlalchemy.orm import Session
+from core.config import User, Role, Permission, UsersAndRoles, RolesAndPermissions
+from core.database import get_db
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -73,7 +76,7 @@ def is_token_revoked(token: str, user_id: int) -> bool:
         token = token[7:]
     return token in revoked_tokens or f"user_{user_id}" in revoked_tokens
 
-async def get_current_user(request: Request) -> dict:
+async def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(
@@ -95,8 +98,22 @@ async def get_current_user(request: Request) -> dict:
                 detail="Токен был отозван"
             )
             
-        payload["token"] = token
-        return payload
+        user = db.query(User).filter(User.id == payload.get("id")).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Пользователь не найден"
+            )
+            
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Пользователь деактивирован"
+            )
+            
+        # Добавляем токен к объекту пользователя для использования в других частях приложения
+        setattr(user, 'token', token)
+        return user
         
     except JWTError:
         raise HTTPException(
@@ -124,4 +141,20 @@ class TokenInfo:
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat(),
             "is_expired": datetime.utcnow() > self.expires_at
-        } 
+        }
+
+def get_user_permissions(user: User, db: Session):
+    permissions = set()
+    for role in user.roles:
+        for perm in role.permissions:
+            if not perm.is_deleted and not role.is_deleted:
+                permissions.add(perm.code)
+    return permissions
+
+def require_permission(permission_code: str):
+    def dependency(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+        perms = get_user_permissions(current_user, db)
+        if permission_code not in perms:
+            raise HTTPException(status_code=403, detail=f"Permission '{permission_code}' required")
+        return True
+    return dependency 

@@ -1,16 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Response, Request
 from typing import List, Dict
-from controllers.auth_controller import AuthController
+from sqlalchemy.orm import Session
 from schemas.user_schemas import UserCreateRequest, UserLoginRequest, UserDTO, TokenDTO, LoginResponseDTO
 from core.security import get_current_user
+from core.config import User
+from core.database import get_db
+from .auth_controller import AuthController
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 auth_controller = AuthController()
 
 @router.post("/register", response_model=UserDTO)
-async def register(user_data: UserCreateRequest):
+async def register(user_data: UserCreateRequest, db: Session = Depends(get_db)):
     try:
-        return auth_controller.register(user_data)
+        return auth_controller.register(user_data, db)
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -23,10 +26,11 @@ async def register(user_data: UserCreateRequest):
 async def login(
     response: Response,
     username: str = Form(...),
-    password: str = Form(...)
+    password: str = Form(...),
+    db: Session = Depends(get_db)
 ):
     login_data = UserLoginRequest(username=username, password=password)
-    tokens = auth_controller.login(login_data)
+    tokens = auth_controller.login(login_data, db)
     
     response.set_cookie(
         key="access_token",
@@ -45,28 +49,28 @@ async def login(
     return LoginResponseDTO(access_token=tokens.access_token)
 
 @router.get("/me", response_model=UserDTO)
-async def get_current_user_info(request: Request):
-    current_user = await get_current_user(request)
-    return auth_controller.get_user_by_id(current_user["id"])
+async def get_current_user_info(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return auth_controller.get_user_by_id(current_user.id, db)
 
 @router.post("/logout")
-async def logout(request: Request, response: Response):
-    current_user = await get_current_user(request)
-    auth_controller.logout(current_user["id"], current_user.get("token", ""))
+async def logout(request: Request, response: Response, current_user: User = Depends(get_current_user)):
+    auth_controller.logout(current_user.id, getattr(current_user, 'token', ''))
     
     response.delete_cookie(key="access_token")
     response.delete_cookie(key="refresh_token")
     return {"message": "Успешный выход из системы"}
 
 @router.get("/tokens")
-async def get_active_tokens(request: Request):
-    current_user = await get_current_user(request)
-    return auth_controller.get_active_tokens(current_user["id"])
+async def get_active_tokens(request: Request, current_user: User = Depends(get_current_user)):
+    return auth_controller.get_active_tokens(current_user.id)
 
 @router.post("/tokens/revoke-all")
-async def revoke_all_tokens(request: Request, response: Response):
-    current_user = await get_current_user(request)
-    result = auth_controller.revoke_all_tokens(current_user["id"])
+async def revoke_all_tokens(
+    request: Request, 
+    response: Response,
+    current_user: User = Depends(get_current_user)
+):
+    result = auth_controller.revoke_all_tokens(current_user.id)
     response.delete_cookie(key="access_token")
     response.delete_cookie(key="refresh_token")
     response.headers["Clear-Site-Data"] = '"cookies", "storage"'
@@ -76,7 +80,7 @@ async def revoke_all_tokens(request: Request, response: Response):
     }
 
 @router.post("/refresh")
-async def refresh_token(request: Request, response: Response):
+async def refresh_token(request: Request, response: Response, db: Session = Depends(get_db)):
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(
@@ -84,7 +88,7 @@ async def refresh_token(request: Request, response: Response):
             detail="Refresh token не предоставлен"
         )
     
-    tokens = auth_controller.refresh_token(refresh_token)
+    tokens = auth_controller.refresh_token(refresh_token, db)
     
     response.set_cookie(
         key="access_token",
@@ -106,10 +110,11 @@ async def change_password(
     request: Request,
     response: Response,
     current_password: str = Form(...),
-    new_password: str = Form(...)
+    new_password: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    current_user = await get_current_user(request)
-    auth_controller.change_password(current_user["id"], current_password, new_password)
+    auth_controller.change_password(current_user.id, current_password, new_password, db)
     response.delete_cookie(key="access_token")
     response.delete_cookie(key="refresh_token")
     return {"message": "Пароль успешно изменен"} 

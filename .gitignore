@@ -5,3 +5,17 @@ core/__pycache__/config.cpython-311.pyc
 core/__pycache__/security.cpython-311.pyc
 routers/__pycache__/auth.cpython-311.pyc
 schemas/__pycache__/user_schemas.cpython-311.pyc
+alembic.ini
+alembic/__pycache__/env.cpython-311.pyc
+alembic/versions/__pycache__/8f4d8135fa19_init_migration.cpython-311.pyc
+controllers/__pycache__/auth_routes.cpython-311.pyc
+controllers/__pycache__/permission_controller.cpython-311.pyc
+controllers/__pycache__/role_controller.cpython-311.pyc
+controllers/__pycache__/role_permission_controller.cpython-311.pyc
+controllers/__pycache__/user_controller.cpython-311.pyc
+controllers/__pycache__/user_role_controller.cpython-311.pyc
+core/__pycache__/database.cpython-311.pyc
+schemas/__pycache__/permission_schemas.cpython-311.pyc
+schemas/__pycache__/role_permission_schemas.cpython-311.pyc
+schemas/__pycache__/role_schemas.cpython-311.pyc
+schemas/__pycache__/user_role_schemas.cpython-311.pyc
