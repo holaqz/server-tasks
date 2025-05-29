@@ -9,11 +9,6 @@ from datetime import datetime
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 
-# Заглушка для получения сессии БД
-# def get_db(): ...
-# Заглушка для проверки авторизации
-# def get_current_user(): ...
-
 def get_db():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -26,7 +21,6 @@ def get_db():
         db.close()
 
 def get_current_user():
-    # Заглушка для авторизации
     return User(id=1, username="admin", email="admin@test.com", hashed_password="hash")
 
 @router.post("/", response_model=RoleDTO, dependencies=[Depends(require_permission("create_role"))])

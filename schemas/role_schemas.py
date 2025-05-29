@@ -16,7 +16,7 @@ class RoleUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=255)
     code: Optional[str] = Field(None, max_length=100)
-    permission_ids: Optional[List[int]] = Field(None, description="Список ID разрешений для назначения роли")
+    permission_ids: Optional[List[int]] = Field(None)
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -8,14 +8,6 @@ from controllers.role_permission_controller import router as role_permission_rou
 
 app = FastAPI(title="Auth API")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Подключаем роуты напрямую из контроллеров
 app.include_router(auth_router)
 app.include_router(role_router)

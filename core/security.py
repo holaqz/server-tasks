@@ -143,18 +143,38 @@ class TokenInfo:
             "is_expired": datetime.utcnow() > self.expires_at
         }
 
-def get_user_permissions(user: User, db: Session):
+def get_user_permissions(user: User, db: Session) -> set[str]:
     permissions = set()
-    for role in user.roles:
-        for perm in role.permissions:
-            if not perm.is_deleted and not role.is_deleted:
-                permissions.add(perm.code)
+    
+    # Получаем только активные связи пользователь-роли
+    for user_role_assoc in db.query(UsersAndRoles).filter(
+        UsersAndRoles.user_id == user.id,
+        UsersAndRoles.is_deleted == False
+    ).all():
+        role = user_role_assoc.role
+        if role.is_deleted:
+            continue
+            
+        for role_perm_assoc in db.query(RolesAndPermissions).filter(
+            RolesAndPermissions.role_id == role.id,
+            RolesAndPermissions.is_deleted == False
+        ).all():
+            permission = role_perm_assoc.permission
+            if not permission.is_deleted:
+                permissions.add(permission.code)
+    
     return permissions
 
 def require_permission(permission_code: str):
-    def dependency(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    def dependency(
+        current_user: User = Depends(get_current_user), 
+        db: Session = Depends(get_db)
+    ):
         perms = get_user_permissions(current_user, db)
         if permission_code not in perms:
-            raise HTTPException(status_code=403, detail=f"Permission '{permission_code}' required")
+            raise HTTPException(
+                status_code=403, 
+                detail=f"Требуется разрешение '{permission_code}'"
+            )
         return True
-    return dependency 
+    return dependency
