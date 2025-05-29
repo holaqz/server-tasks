@@ -19,3 +19,4 @@ schemas/__pycache__/permission_schemas.cpython-311.pyc
 schemas/__pycache__/role_permission_schemas.cpython-311.pyc
 schemas/__pycache__/role_schemas.cpython-311.pyc
 schemas/__pycache__/user_role_schemas.cpython-311.pyc
+test.db

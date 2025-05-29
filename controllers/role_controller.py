@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from core.config import User, Role, Base
+from core.config import User, Role, Base, Permission, RolesAndPermissions
 from schemas.role_schemas import RoleCreateRequest, RoleUpdateRequest, RoleDTO, RoleCollectionDTO
 from typing import List
 from core.security import require_permission
@@ -33,8 +33,16 @@ def get_current_user():
 def create_role(request: RoleCreateRequest, db: Session = Depends(get_db)):
     # Проверка уникальности
     if db.query(Role).filter((Role.name == request.name) | (Role.code == request.code)).first():
-        raise HTTPException(status_code=400, detail="Role name or code must be unique")
-    role = Role(name=request.name, description=request.description, code=request.code)
+        raise HTTPException(status_code=400, detail="Имя или код роли должны быть уникальными")
+    
+    now = datetime.utcnow()
+    role = Role(
+        name=request.name,
+        description=request.description,
+        code=request.code,
+        created_at=now,
+        updated_at=now
+    )
     db.add(role)
     db.commit()
     db.refresh(role)
@@ -42,30 +50,77 @@ def create_role(request: RoleCreateRequest, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=RoleCollectionDTO, dependencies=[Depends(require_permission("get-list_role"))])
 def list_roles(db: Session = Depends(get_db)):
-    roles = db.query(Role).filter(Role.is_deleted == False).all()
+    roles = db.query(Role).filter(Role.deleted_at == None).all()
     return RoleCollectionDTO(roles=roles)
 
 @router.get("/{role_id}", response_model=RoleDTO, dependencies=[Depends(require_permission("read_role"))])
 def get_role(role_id: int, db: Session = Depends(get_db)):
-    role = db.query(Role).filter(Role.id == role_id, Role.is_deleted == False).first()
+    role = db.query(Role).filter(Role.id == role_id, Role.deleted_at == None).first()
     if not role:
-        raise HTTPException(status_code=404, detail="Role not found")
+        raise HTTPException(status_code=404, detail="Роль не найдена")
     return role
 
 @router.put("/{role_id}", response_model=RoleDTO, dependencies=[Depends(require_permission("update_role"))])
 def update_role(role_id: int, request: RoleUpdateRequest, db: Session = Depends(get_db)):
-    role = db.query(Role).filter(Role.id == role_id, Role.is_deleted == False).first()
-    if not role:
-        raise HTTPException(status_code=404, detail="Role not found")
-    if request.name and db.query(Role).filter(Role.name == request.name, Role.id != role_id).first():
-        raise HTTPException(status_code=400, detail="Role name must be unique")
-    if request.code and db.query(Role).filter(Role.code == request.code, Role.id != role_id).first():
-        raise HTTPException(status_code=400, detail="Role code must be unique")
-    for field, value in request.dict(exclude_unset=True).items():
-        setattr(role, field, value)
-    db.commit()
-    db.refresh(role)
-    return role
+    try:
+        # Проверяем существование роли
+        role = db.query(Role).filter(Role.id == role_id, Role.deleted_at == None).first()
+        if not role:
+            raise HTTPException(status_code=404, detail="Роль не найдена")
+
+        # Проверяем уникальность имени и кода
+        if request.name and db.query(Role).filter(Role.name == request.name, Role.id != role_id).first():
+            raise HTTPException(status_code=400, detail="Имя роли должно быть уникальным")
+        if request.code and db.query(Role).filter(Role.code == request.code, Role.id != role_id).first():
+            raise HTTPException(status_code=400, detail="Код роли должен быть уникальным")
+
+        # Обновляем основные поля роли
+        update_data = request.dict(exclude_unset=True)
+        permission_ids = update_data.pop('permission_ids', None)
+        
+        for field, value in update_data.items():
+            setattr(role, field, value)
+
+        role.updated_at = datetime.utcnow()
+
+        # Если предоставлен список разрешений, обновляем их
+        if permission_ids is not None:
+            # Проверяем существование всех разрешений
+            permissions = db.query(Permission).filter(
+                Permission.id.in_(permission_ids),
+                Permission.deleted_at == None
+            ).all()
+            
+            if len(permissions) != len(permission_ids):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Одно или несколько разрешений не найдены"
+                )
+
+            # Удаляем все текущие связи
+            db.query(RolesAndPermissions).filter(
+                RolesAndPermissions.role_id == role_id
+            ).delete()
+
+            # Создаем новые связи
+            for permission_id in permission_ids:
+                role_permission = RolesAndPermissions(
+                    role_id=role_id,
+                    permission_id=permission_id
+                )
+                db.add(role_permission)
+
+        db.commit()
+        db.refresh(role)
+        return role
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при обновлении роли: {str(e)}"
+        )
 
 @router.delete("/{role_id}", response_model=RoleDTO, dependencies=[Depends(require_permission("soft_delete_role"))])
 def soft_delete_role(
@@ -74,11 +129,11 @@ def soft_delete_role(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Мягкое удаление роли (установка флага is_deleted)
+    Мягкое удаление роли
     """
     try:
         # Проверяем существование роли
-        role = db.query(Role).filter(Role.id == role_id, Role.is_deleted == False).first()
+        role = db.query(Role).filter(Role.id == role_id, Role.deleted_at == None).first()
         if not role:
             raise HTTPException(status_code=404, detail="Роль не найдена или уже удалена")
 
@@ -90,9 +145,10 @@ def soft_delete_role(
             )
 
         # Помечаем роль как удаленную
-        role.is_deleted = True
+        now = datetime.utcnow()
         role.deleted_by = current_user.id
-        role.deleted_at = datetime.utcnow()
+        role.deleted_at = now
+        role.updated_at = now
 
         db.commit()
         db.refresh(role)
@@ -158,13 +214,13 @@ def restore_role(
     Восстановление мягко удаленной роли
     """
     try:
-        role = db.query(Role).filter(Role.id == role_id, Role.is_deleted == True).first()
+        role = db.query(Role).filter(Role.id == role_id, Role.deleted_at != None).first()
         if not role:
             raise HTTPException(status_code=404, detail="Роль не найдена или не была удалена")
         
-        role.is_deleted = False
         role.deleted_by = None
         role.deleted_at = None
+        role.updated_at = datetime.utcnow()
         
         db.commit()
         db.refresh(role)
