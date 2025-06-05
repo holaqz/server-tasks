@@ -76,7 +76,7 @@ def is_token_revoked(token: str, user_id: int) -> bool:
         token = token[7:]
     return token in revoked_tokens or f"user_{user_id}" in revoked_tokens
 
-async def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(

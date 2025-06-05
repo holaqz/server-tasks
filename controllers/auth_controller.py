@@ -8,6 +8,7 @@ from core.security import (
 )
 from core.config import get_settings, User, Role, UsersAndRoles
 from schemas.user_schemas import UserCreateRequest, UserLoginRequest, UserDTO, TokenDTO
+from core.config import ChangeLogs
 
 settings = get_settings()
 
@@ -64,9 +65,18 @@ class AuthController:
                 role_id=user_role.id
             )
             db.add(user_role_link)
+        
+        log = ChangeLogs(entity_type="User",
+                     entity_id=new_user.id,
+                     action="Create",
+                     old_value="{}",
+                     new_value=str(new_user),
+                     created_at=datetime.now())
 
+        db.add(log)
         db.commit()
         db.refresh(new_user)
+        db.refresh(log)
         
         return UserDTO(
             id=new_user.id,
@@ -120,6 +130,16 @@ class AuthController:
             self._active_tokens[user.id] = []
         self._active_tokens[user.id].append(token_pair)
         
+        log = ChangeLogs(entity_type="User",
+                         entity_id=user.id,
+                         action="Login",
+                         old_value="",
+                         new_value=access_token,
+                         created_at=datetime.now())
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        
         return TokenDTO(access_token=access_token, refresh_token=refresh_token)
 
     def get_user_by_id(self, user_id: int, db: Session) -> UserDTO:
@@ -136,7 +156,7 @@ class AuthController:
             is_active=user.is_active
         )
 
-    def logout(self, user_id: int, token: str):
+    def logout(self, user_id: int, token: str, db: Session):
         if not token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -150,6 +170,17 @@ class AuthController:
                 pair for pair in self._active_tokens[user_id] 
                 if pair["access_token"] != token
             ]
+        
+        log = ChangeLogs(entity_type="User",
+                     entity_id=token["id"],
+                     action="Logout",
+                     old_value=token,
+                     new_value="",
+                     created_at=datetime.now())
+
+        db.add(log)
+        db.commit()
+        db.refresh(log)
 
     def get_active_tokens(self, user_id: int) -> List[Dict[str, str]]:
         tokens = []

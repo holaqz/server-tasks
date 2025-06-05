@@ -2,10 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, Form, Response, R
 from typing import List, Dict
 from sqlalchemy.orm import Session
 from schemas.user_schemas import UserCreateRequest, UserLoginRequest, UserDTO, TokenDTO, LoginResponseDTO
-from core.security import get_current_user
-from core.config import User
+from core.security import get_current_user, require_permission
+from core.config import User, ChangeLogs
 from core.database import get_db
 from .auth_controller import AuthController
+from schemas.log_schemas import ChangeLogResponse
+from schemas.exception_schemas import UserNotFoundError
+from core.log import get_user_logs
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 auth_controller = AuthController()
@@ -53,8 +56,8 @@ async def get_current_user_info(request: Request, db: Session = Depends(get_db),
     return auth_controller.get_user_by_id(current_user.id, db)
 
 @router.post("/logout")
-async def logout(request: Request, response: Response, current_user: User = Depends(get_current_user)):
-    auth_controller.logout(current_user.id, getattr(current_user, 'token', ''))
+async def logout(request: Request, response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    auth_controller.logout(current_user.id, getattr(current_user, 'token', ''), db)
     
     response.delete_cookie(key="access_token")
     response.delete_cookie(key="refresh_token")
@@ -118,3 +121,29 @@ async def change_password(
     response.delete_cookie(key="access_token")
     response.delete_cookie(key="refresh_token")
     return {"message": "Пароль успешно изменен"} 
+
+@router.get("/{user_id}/logs", response_model=List[ChangeLogResponse],
+           dependencies=[Depends(require_permission("get_story_user")), Depends(get_current_user)])
+def get_user_logs(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    try:
+        logs = db.query(ChangeLogs).filter(
+            ChangeLogs.entity_type == "User",
+            ChangeLogs.entity_id == user_id
+        ).order_by(ChangeLogs.created_at.desc()).all()
+
+        if not logs:
+            raise HTTPException(
+                status_code=404,
+                detail="Логи для данного пользователя не найдены"
+            )
+
+        return [ChangeLogResponse.from_orm(log) for log in logs]
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении логов пользователя: {str(e)}"
+        )

@@ -4,8 +4,9 @@ from typing import Optional, List
 import os
 from dotenv import load_dotenv
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, UniqueConstraint, func, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, UniqueConstraint, func, Date, Text
 from sqlalchemy.orm import relationship
+from datetime import datetime
 
 load_dotenv()
 
@@ -119,3 +120,14 @@ class RolesAndPermissions(Base):
     # Основные отношения
     role = relationship('Role', foreign_keys=[role_id])
     permission = relationship('Permission', foreign_keys=[permission_id])
+    
+class ChangeLogs(Base):
+    __tablename__ = "change_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    entity_type = Column(String(100), nullable=False)
+    entity_id = Column(Integer, nullable=False)
+    action = Column(String(10), nullable=False)
+    old_value = Column(Text)
+    new_value = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)

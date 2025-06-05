@@ -25,3 +25,8 @@ alembic/versions/__pycache__/add_soft_delete_to_role_permissions.cpython-311.pyc
 alembic/versions/__pycache__/bce98734366a_soft_delete.cpython-311.pyc
 schemas/__pycache__/role_permission.cpython-311.pyc
 alembic/versions/__pycache__/ff9b1fef6cf0_add_soft_delete_fields_to_permissions.cpython-311.pyc
+alembic/versions/__pycache__/a15a76f61b98_asdasd.cpython-311.pyc
+test.db
+core/__pycache__/log.cpython-311.pyc
+schemas/__pycache__/exception_schemas.cpython-311.pyc
+schemas/__pycache__/log_schemas.cpython-311.pyc

@@ -66,6 +66,22 @@ additional_permissions = [
         "name": "soft-delete-permission",
         "description": "Мягкое удаление разрешения",
         "code": "soft_delete_permission"
+    },
+    
+    {
+        "name": "get-story-user",
+        "description": "Получение логов пользователей",
+        "code": "get_story_user"
+    },
+    {
+        "name": "get-story-roles",
+        "description": "Получение логов ролей",
+        "code": "get_story_roles"
+    },
+    {
+        "name": "get-story-permission",
+        "description": "Получение логов разрешений",
+        "code": "get_story_permission"
     }
 ]
 

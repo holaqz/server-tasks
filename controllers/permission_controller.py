@@ -1,10 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from core.config import Permission, User, RolesAndPermissions
+from typing import List
+from core.config import Permission, User, RolesAndPermissions, ChangeLogs
 from schemas.permission_schemas import PermissionCreateRequest, PermissionUpdateRequest, PermissionDTO, PermissionCollectionDTO
 from core.security import require_permission
 from core.database import get_db
 from datetime import datetime
+from core.log import get_all_permission
+from schemas.log_schemas import ChangeLogResponse
+from schemas.exception_schemas import PermissionNotFoundError
+
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
 
@@ -27,6 +32,26 @@ def create_permission(request: PermissionCreateRequest, db: Session = Depends(ge
     db.add(perm)
     db.commit()
     db.refresh(perm)
+    
+    log = ChangeLogs(entity_type="Permission",
+                     entity_id=perm.id,
+                     action="Create",
+                     old_value="",
+                     new_value=str({
+                         "name": perm.name,
+                         "description": perm.description,
+                         "code": perm.code,
+                         "is_delited": perm.is_deleted,
+                         "created_at": perm.created_at,
+                         "updaated_at": perm.updated_at,
+                         "delitedd_at": perm.deleted_at
+                     }),
+                     created_at=datetime.now())
+
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
     return perm
 
 @router.get("/", response_model=PermissionCollectionDTO, dependencies=[Depends(require_permission("get-list_permission"))])
@@ -48,6 +73,17 @@ def update_permission(permission_id: int, request: PermissionUpdateRequest, db: 
         if not perm:
             raise HTTPException(status_code=404, detail="Разрешение не найдено")
 
+        old_perm = {
+            "id" : perm.id,
+            "name": perm.name,
+            "description": perm.description,
+            "code": perm.code,
+            "is_deleted": perm.is_deleted,
+            "created_at": perm.created_at,
+            "updated_at": perm.updated_at,
+            "deleted_at": perm.deleted_at
+        }
+        
         if request.name and db.query(Permission).filter(Permission.name == request.name, Permission.id != permission_id).first():
             raise HTTPException(status_code=400, detail="Имя разрешения должно быть уникальным")
         if request.code and db.query(Permission).filter(Permission.code == request.code, Permission.id != permission_id).first():
@@ -60,6 +96,27 @@ def update_permission(permission_id: int, request: PermissionUpdateRequest, db: 
         
         db.commit()
         db.refresh(perm)
+        
+        log = ChangeLogs(entity_type="Permission",
+                         entity_id=perm.id,
+                         action="Delete_soft",
+                         old_value=str(old_perm),
+                         new_value=str({
+                             "id": perm.id,
+                             "name": perm.name,
+                             "description": perm.description,
+                             "code": perm.code,
+                             "is_deleted": perm.is_deleted,
+                             "created_at": perm.created_at,
+                             "updated_at": perm.updated_at,
+                             "deleted_at": perm.deleted_at
+                         }),
+                         created_at=datetime.now())
+
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+    
         return perm
     except HTTPException:
         raise
@@ -89,6 +146,17 @@ def soft_delete_permission(
                 status_code=400, 
                 detail="Невозможно удалить системное разрешение"
             )
+            
+        old_perm = {
+            "id": perm.id,
+            "name": perm.name,
+            "description": perm.description,
+            "code": perm.code,
+            "is_deleted": perm.is_deleted,
+            "created_at": perm.created_at,
+            "updated_at": perm.updated_at,
+            "deleted_at": perm.deleted_at
+        }
 
         now = datetime.utcnow()
         perm.deleted_by = current_user.id
@@ -97,7 +165,29 @@ def soft_delete_permission(
 
         db.commit()
         db.refresh(perm)
+        
+        log = ChangeLogs(entity_type="Permission",
+                         entity_id=perm.id,
+                         action="Delete_soft",
+                         old_value=str(old_perm),
+                         new_value=str({
+                             "id": perm.id,
+                             "name": perm.name,
+                             "description": perm.description,
+                             "code": perm.code,
+                             "is_deleted": perm.is_deleted,
+                             "created_at": perm.created_at,
+                             "updated_at": perm.updated_at,
+                             "deleted_at": perm.deleted_at
+                         }),
+                         created_at=datetime.now())
+
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+
         return perm
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -137,6 +227,26 @@ def hard_delete_permission(
                 detail="Невозможно удалить разрешение, пока оно назначено ролям. Сначала удалите все связи с ролями."
             )
 
+        log = ChangeLogs(entity_type="Permission",
+                         entity_id=perm.id,
+                         action="Delete_soft",
+                         old_value=str({
+                             "id": perm.id,
+                             "name": perm.name,
+                             "description": perm.description,
+                             "code": perm.code,
+                             "is_deleted": perm.is_deleted,
+                             "created_at": perm.created_at,
+                             "updated_at": perm.updated_at,
+                             "deleted_at": perm.deleted_at
+                         }),
+                         new_value="",
+                         created_at=datetime.now())
+
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+
         db.delete(perm)
         db.commit()
         return perm
@@ -160,6 +270,16 @@ def restore_permission(
     """
     try:
         perm = db.query(Permission).filter(Permission.id == permission_id, Permission.deleted_at != None).first()
+        old_perm = {
+            "id": perm.id,
+            "name": perm.name,
+            "description": perm.description,
+            "code": perm.code,
+            "is_deleted": perm.is_deleted,
+            "created_at": perm.created_at,
+            "updated_at": perm.updated_at,
+            "deleted_at": perm.deleted_at
+        }
         if not perm:
             raise HTTPException(status_code=404, detail="Разрешение не найдено или не было удалено")
         
@@ -169,6 +289,26 @@ def restore_permission(
         
         db.commit()
         db.refresh(perm)
+        log = ChangeLogs(entity_type="Permission",
+                         entity_id=perm.id,
+                         action="Restore_soft",
+                         old_value=str(old_perm),
+                         new_value=str({
+                             "id": perm.id,
+                             "name": perm.name,
+                             "description": perm.description,
+                             "code": perm.code,
+                             "is_deleted": perm.is_deleted,
+                             "created_at": perm.created_at,
+                             "updated_at": perm.updated_at,
+                             "deleted_at": perm.deleted_at
+                         }),
+                         created_at=datetime.now())
+        
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        
         return perm
     except HTTPException:
         raise
@@ -178,3 +318,29 @@ def restore_permission(
             status_code=500, 
             detail=f"Ошибка при восстановлении разрешения: {str(e)}"
         ) 
+
+@router.get("/{permissions_id}/logs", response_model=List[ChangeLogResponse],
+           dependencies=[Depends(require_permission("get_story_permission")), Depends(get_current_user)])
+def get_permission_logs(
+    permissions_id: int,
+    db: Session = Depends(get_db)
+):
+    try:
+        logs = db.query(ChangeLogs).filter(
+            ChangeLogs.entity_type == "Permission",
+            ChangeLogs.entity_id == permissions_id
+        ).order_by(ChangeLogs.created_at.desc()).all()
+
+        if not logs:
+            raise HTTPException(
+                status_code=404,
+                detail="Логи для данного разрешения не найдены"
+            )
+
+        return [ChangeLogResponse.from_orm(log) for log in logs]
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при получении логов разрешения: {str(e)}"
+        )
