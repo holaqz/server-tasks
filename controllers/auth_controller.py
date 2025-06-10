@@ -136,6 +136,7 @@ class AuthController:
                          old_value="",
                          new_value=access_token,
                          created_at=datetime.now())
+        
         db.add(log)
         db.commit()
         db.refresh(log)

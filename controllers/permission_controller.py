@@ -9,12 +9,40 @@ from datetime import datetime
 from core.log import get_all_permission
 from schemas.log_schemas import ChangeLogResponse
 from schemas.exception_schemas import PermissionNotFoundError
+from core.log import compare_dicts_ignoring_timestamps, get_changed_fields, format_changes
+import json
+
 
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
 
 def get_current_user():
     return User(id=1, username="admin", email="admin@test.com", hashed_password="hash")
+
+def serialize_datetime(obj):
+    """Преобразует datetime объекты в строки ISO формата"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    return obj
+
+def permission_to_dict(permission):
+    """Преобразует объект разрешения в словарь с нужными полями"""
+    return {
+        'id': permission.id,
+        'name': permission.name,
+        'description': permission.description,
+        'is_deleted': permission.is_deleted,
+        'created_at': permission.created_at,
+        'updated_at': permission.updated_at,
+        'deleted_at': permission.deleted_at
+    }
+
+def has_changes(old_data: dict, new_data: dict) -> bool:
+    """Проверяет, есть ли изменения между старыми и новыми данными"""
+    for key, value in new_data.items():
+        if key not in ['updated_at'] and old_data.get(key) != value:
+            return True
+    return False
 
 @router.post("/", response_model=PermissionDTO, dependencies=[Depends(require_permission("create_permission"))])
 def create_permission(request: PermissionCreateRequest, db: Session = Depends(get_db)):
@@ -36,17 +64,8 @@ def create_permission(request: PermissionCreateRequest, db: Session = Depends(ge
     log = ChangeLogs(entity_type="Permission",
                      entity_id=perm.id,
                      action="Create",
-                     old_value="",
-                     new_value=str({
-                         "name": perm.name,
-                         "description": perm.description,
-                         "code": perm.code,
-                         "is_delited": perm.is_deleted,
-                         "created_at": perm.created_at,
-                         "updaated_at": perm.updated_at,
-                         "delitedd_at": perm.deleted_at
-                     }),
-                     created_at=datetime.now())
+                     old_value=None,
+                     new_value=json.dumps(permission_to_dict(perm), default=serialize_datetime))
 
     db.add(log)
     db.commit()
@@ -73,49 +92,42 @@ def update_permission(permission_id: int, request: PermissionUpdateRequest, db: 
         if not perm:
             raise HTTPException(status_code=404, detail="Разрешение не найдено")
 
-        old_perm = {
-            "id" : perm.id,
-            "name": perm.name,
-            "description": perm.description,
-            "code": perm.code,
-            "is_deleted": perm.is_deleted,
-            "created_at": perm.created_at,
-            "updated_at": perm.updated_at,
-            "deleted_at": perm.deleted_at
-        }
-        
+        # Проверяем уникальность имени и кода
         if request.name and db.query(Permission).filter(Permission.name == request.name, Permission.id != permission_id).first():
             raise HTTPException(status_code=400, detail="Имя разрешения должно быть уникальным")
         if request.code and db.query(Permission).filter(Permission.code == request.code, Permission.id != permission_id).first():
             raise HTTPException(status_code=400, detail="Код разрешения должен быть уникальным")
 
-        for field, value in request.dict(exclude_unset=True).items():
-            setattr(perm, field, value)
-        
-        perm.updated_at = datetime.utcnow()
-        
-        db.commit()
-        db.refresh(perm)
-        
-        log = ChangeLogs(entity_type="Permission",
-                         entity_id=perm.id,
-                         action="Delete_soft",
-                         old_value=str(old_perm),
-                         new_value=str({
-                             "id": perm.id,
-                             "name": perm.name,
-                             "description": perm.description,
-                             "code": perm.code,
-                             "is_deleted": perm.is_deleted,
-                             "created_at": perm.created_at,
-                             "updated_at": perm.updated_at,
-                             "deleted_at": perm.deleted_at
-                         }),
-                         created_at=datetime.now())
+        # Сохраняем старые значения для лога
+        old_perm = permission_to_dict(perm)
 
-        db.add(log)
-        db.commit()
-        db.refresh(log)
+        # Обновляем поля через SQL
+        update_data = request.dict(exclude_unset=True)
+        has_changes = False
+        
+        if update_data:
+            # Проверяем каждое поле на реальное изменение
+            for field, new_value in update_data.items():
+                if getattr(perm, field) != new_value:
+                    has_changes = True
+                    break
+            
+            if has_changes:
+                update_data['updated_at'] = datetime.utcnow()
+                result = db.query(Permission).filter(Permission.id == permission_id).update(update_data)
+                if result > 0:
+                    db.commit()
+                    db.refresh(perm)
+                    
+                    log = ChangeLogs(entity_type="Permission",
+                                entity_id=perm.id,
+                                action="Update",
+                                old_value=json.dumps(old_perm, default=serialize_datetime),
+                                new_value=json.dumps(permission_to_dict(perm), default=serialize_datetime))
+
+                    db.add(log)
+                    db.commit()
+                    db.refresh(log)
     
         return perm
     except HTTPException:
@@ -147,16 +159,7 @@ def soft_delete_permission(
                 detail="Невозможно удалить системное разрешение"
             )
             
-        old_perm = {
-            "id": perm.id,
-            "name": perm.name,
-            "description": perm.description,
-            "code": perm.code,
-            "is_deleted": perm.is_deleted,
-            "created_at": perm.created_at,
-            "updated_at": perm.updated_at,
-            "deleted_at": perm.deleted_at
-        }
+        old_perm = permission_to_dict(perm)
 
         now = datetime.utcnow()
         perm.deleted_by = current_user.id
@@ -169,18 +172,8 @@ def soft_delete_permission(
         log = ChangeLogs(entity_type="Permission",
                          entity_id=perm.id,
                          action="Delete_soft",
-                         old_value=str(old_perm),
-                         new_value=str({
-                             "id": perm.id,
-                             "name": perm.name,
-                             "description": perm.description,
-                             "code": perm.code,
-                             "is_deleted": perm.is_deleted,
-                             "created_at": perm.created_at,
-                             "updated_at": perm.updated_at,
-                             "deleted_at": perm.deleted_at
-                         }),
-                         created_at=datetime.now())
+                         old_value=json.dumps(old_perm, default=serialize_datetime),
+                         new_value=json.dumps(permission_to_dict(perm), default=serialize_datetime))
 
         db.add(log)
         db.commit()
@@ -230,16 +223,7 @@ def hard_delete_permission(
         log = ChangeLogs(entity_type="Permission",
                          entity_id=perm.id,
                          action="Delete_soft",
-                         old_value=str({
-                             "id": perm.id,
-                             "name": perm.name,
-                             "description": perm.description,
-                             "code": perm.code,
-                             "is_deleted": perm.is_deleted,
-                             "created_at": perm.created_at,
-                             "updated_at": perm.updated_at,
-                             "deleted_at": perm.deleted_at
-                         }),
+                         old_value=json.dumps(permission_to_dict(perm), default=serialize_datetime),
                          new_value="",
                          created_at=datetime.now())
 
@@ -270,16 +254,7 @@ def restore_permission(
     """
     try:
         perm = db.query(Permission).filter(Permission.id == permission_id, Permission.deleted_at != None).first()
-        old_perm = {
-            "id": perm.id,
-            "name": perm.name,
-            "description": perm.description,
-            "code": perm.code,
-            "is_deleted": perm.is_deleted,
-            "created_at": perm.created_at,
-            "updated_at": perm.updated_at,
-            "deleted_at": perm.deleted_at
-        }
+        old_perm = permission_to_dict(perm)
         if not perm:
             raise HTTPException(status_code=404, detail="Разрешение не найдено или не было удалено")
         
@@ -292,18 +267,8 @@ def restore_permission(
         log = ChangeLogs(entity_type="Permission",
                          entity_id=perm.id,
                          action="Restore_soft",
-                         old_value=str(old_perm),
-                         new_value=str({
-                             "id": perm.id,
-                             "name": perm.name,
-                             "description": perm.description,
-                             "code": perm.code,
-                             "is_deleted": perm.is_deleted,
-                             "created_at": perm.created_at,
-                             "updated_at": perm.updated_at,
-                             "deleted_at": perm.deleted_at
-                         }),
-                         created_at=datetime.now())
+                         old_value=json.dumps(old_perm, default=serialize_datetime),
+                         new_value=json.dumps(permission_to_dict(perm), default=serialize_datetime))
         
         db.add(log)
         db.commit()

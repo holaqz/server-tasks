@@ -5,6 +5,7 @@ from controllers.role_controller import router as role_router
 from controllers.permission_controller import router as permission_router
 from controllers.user_controller import router as user_router
 from controllers.role_permission_controller import router as role_permission_router
+from controllers.log_controller import router as log_router
 
 app = FastAPI(title="Auth API")
 
@@ -14,6 +15,7 @@ app.include_router(role_router)
 app.include_router(permission_router)
 app.include_router(user_router)
 app.include_router(role_permission_router)
+app.include_router(log_router)
 
 @app.get("/")
 async def root():

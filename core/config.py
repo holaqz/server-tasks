@@ -94,10 +94,8 @@ class UsersAndRoles(Base):
     created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     __table_args__ = (UniqueConstraint('user_id', 'role_id', name='_user_role_uc'),)
 
-    # Определяем отношения для аудита
     deleter = relationship('User', foreign_keys=[deleted_by], overlaps="user_roles,users")
     creator = relationship('User', foreign_keys=[created_by], overlaps="user_roles,users")
-    # Основное отношение для связи пользователь-роль
     user = relationship('User', foreign_keys=[user_id], overlaps="user_roles,users")
     role = relationship('Role', foreign_keys=[role_id], overlaps="user_roles,users")
 
@@ -114,10 +112,8 @@ class RolesAndPermissions(Base):
     created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     __table_args__ = (UniqueConstraint('role_id', 'permission_id', name='_role_permission_uc'),)
 
-    # Определяем отношения для аудита
     deleter = relationship('User', foreign_keys=[deleted_by])
     creator = relationship('User', foreign_keys=[created_by])
-    # Основные отношения
     role = relationship('Role', foreign_keys=[role_id])
     permission = relationship('Permission', foreign_keys=[permission_id])
     

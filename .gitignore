@@ -30,3 +30,4 @@ test.db
 core/__pycache__/log.cpython-311.pyc
 schemas/__pycache__/exception_schemas.cpython-311.pyc
 schemas/__pycache__/log_schemas.cpython-311.pyc
+controllers/__pycache__/log_controller.cpython-311.pyc

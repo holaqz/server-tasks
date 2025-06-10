@@ -34,11 +34,6 @@ class ChangeLogResponse(ChangeLogBase):
         from_attributes = True
 
 class ChangeLogCollection(BaseModel):
-    """DTO класс для коллекции логов изменений.
-
-    Attributes:
-        items (list[ChangeLogResponse]): Список логов изменений.
-        total (int): Общее количество логов.
-    """
+    """DTO класс для коллекции логов изменений."""
     items: list[ChangeLogResponse]
     total: int
